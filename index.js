@@ -236,3 +236,88 @@ app.get("/recent-events", async (req, res) => {
     handleError(res, error);
   }
 });
+
+// My Created Events (Manage Events)
+app.get("/my-events", verifyToken, async (req, res) => {
+  try {
+    const result = await events
+      .aggregate([
+        { $match: { creatorEmail: req.user.email } },
+        { $sort: { createdAt: -1 } },
+        ...withParticipantsCount,
+      ])
+      .toArray();
+
+    res.json({ success: true, events: result });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+// Joined Events
+app.get("/joined-events", verifyToken, async (req, res) => {
+  try {
+    const result = await registrations
+      .aggregate([
+        { $match: { userEmail: req.user.email, status: "joined" } },
+        {
+          $lookup: {
+            from: "events",
+            localField: "eventId",
+            foreignField: "_id",
+            as: "event",
+          },
+        },
+        { $unwind: "$event" },
+        { $sort: { "event.eventDate": 1 } },
+        { $project: { joinedAt: 1, event: 1 } },
+      ])
+      .toArray();
+
+    res.json({ success: true, joinedEvents: result });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+// Event Details
+app.get("/events/:id", async (req, res) => {
+  try {
+    if (!validId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid event ID" });
+    }
+
+    const [event] = await events
+      .aggregate([
+        { $match: { _id: eventId(req.params.id), status: "published" } },
+        ...withParticipantsCount,
+      ])
+      .toArray();
+
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    res.json({ success: true, event });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/events/:id/join-status", verifyToken, async (req, res) => {
+  try {
+    if (!validId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid event ID" });
+    }
+
+    const joined = await registrations.findOne({
+      eventId: eventId(req.params.id),
+      userEmail: req.user.email,
+      status: "joined",
+    });
+
+    res.json({ success: true, joined: Boolean(joined) });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
