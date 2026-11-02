@@ -321,3 +321,103 @@ app.get("/events/:id/join-status", verifyToken, async (req, res) => {
     handleError(res, error);
   }
 });
+
+
+app.patch("/events/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!validId(id)) {
+      return res.status(400).json({ message: "Invalid event ID" });
+    }
+
+    const allowed = [
+      "title",
+      "description",
+      "eventType",
+      "thumbnail",
+      "location",
+      "eventDate",
+      "maxParticipants",
+    ];
+
+    const updateData = {};
+
+    allowed.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    });
+
+    const errors = validateEvent(updateData, true);
+
+    if (errors.length || !Object.keys(updateData).length) {
+      return res.status(400).json({ errors, message: "Invalid update data" });
+    }
+
+    if (updateData.title) updateData.title = String(updateData.title).trim();
+    if (updateData.description) updateData.description = String(updateData.description).trim();
+    if (updateData.location) updateData.location = String(updateData.location).trim();
+
+    if (updateData.eventDate) {
+      updateData.eventDate = new Date(updateData.eventDate);
+    }
+
+    if (updateData.maxParticipants !== undefined) {
+      updateData.maxParticipants = Number(updateData.maxParticipants);
+
+
+      const joinedCount = await registrations.countDocuments({
+        eventId: eventId(id),
+        status: "joined",
+      });
+
+      if (updateData.maxParticipants < joinedCount) {
+        return res.status(400).json({
+          message: `Limit cannot be less than current participants (${joinedCount})`,
+        });
+      }
+    }
+
+    updateData.updatedAt = new Date();
+
+    const result = await events.updateOne(
+      { _id: eventId(id), creatorEmail: req.user.email },
+      { $set: updateData }
+    );
+
+    if (!result.matchedCount) {
+      return res.status(404).json({ message: "Event not found or not yours" });
+    }
+
+    res.json({ success: true, message: "Event updated successfully" });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+
+app.delete("/events/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!validId(id)) {
+      return res.status(400).json({ message: "Invalid event ID" });
+    }
+
+    const result = await events.deleteOne({
+      _id: eventId(id),
+      creatorEmail: req.user.email,
+    });
+
+    if (!result.deletedCount) {
+      return res.status(404).json({ message: "Event not found or not yours" });
+    }
+
+    await registrations.deleteMany({ eventId: eventId(id) });
+
+    res.json({ success: true, message: "Event deleted successfully" });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
