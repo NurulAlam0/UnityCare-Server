@@ -144,3 +144,95 @@ function validateEvent(data, partial = false) {
 
   return errors;
 }
+
+
+
+// Home
+app.get("/", (req, res) => {
+  res.send("UnityCare Server is Running!");
+});
+
+// Create Event
+app.post("/events", verifyToken, async (req, res) => {
+  try {
+    const errors = validateEvent(req.body);
+
+    if (errors.length) {
+      return res.status(400).json({ errors });
+    }
+
+    const { title, description, eventType, thumbnail, location, eventDate, maxParticipants } =
+      req.body;
+
+    const newEvent = {
+      title: String(title).trim(),
+      description: String(description).trim(),
+      eventType,
+      thumbnail,
+      location: String(location).trim(),
+      eventDate: new Date(eventDate),
+      creatorEmail: req.user.email,
+      creatorName: req.user.name,
+      status: "published",
+      ...(maxParticipants !== undefined && {
+        maxParticipants: Number(maxParticipants),
+      }),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await events.insertOne(newEvent);
+
+    res.status(201).json({
+      success: true,
+      message: "Event created successfully",
+      event: { _id: result.insertedId, ...newEvent },
+    });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+// Get Upcoming Events  (?eventType=Cleanup&search=dhaka)
+app.get("/events", async (req, res) => {
+  try {
+    const { eventType, search } = req.query;
+
+    const query = { status: "published", eventDate: { $gte: startOfToday() } };
+
+    if (eventType && eventType !== "All") {
+      query.eventType = String(eventType);
+    }
+
+    if (search) {
+      const regex = new RegExp(escapeRegex(String(search)), "i");
+      query.$or = [{ title: regex }, { location: regex }, { description: regex }];
+    }
+
+    const result = await events
+      .aggregate([{ $match: query }, { $sort: { eventDate: 1 } }, ...withParticipantsCount])
+      .toArray();
+
+    res.json({ success: true, events: result });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+// Recent 6 Events
+app.get("/recent-events", async (req, res) => {
+  try {
+    const result = await events
+      .aggregate([
+        { $match: { status: "published", eventDate: { $gte: startOfToday() } } },
+        { $sort: { eventDate: 1 } },
+        { $limit: 6 },
+        ...withParticipantsCount,
+      ])
+      .toArray();
+
+    res.json({ success: true, events: result });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
