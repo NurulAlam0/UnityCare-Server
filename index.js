@@ -63,3 +63,84 @@ async function verifyToken(req, res, next) {
     res.status(401).json({ message: "Invalid token" });
   }
 }
+
+
+const EVENT_TYPES = [
+  "Donation",
+  "Cleanup",
+  "Plantation",
+  "Winter Relief",
+  "Food Drive",
+  "Health Camp",
+  "Education",
+];
+
+const validId = (id) => ObjectId.isValid(id) && String(new ObjectId(id)) === id;
+
+const eventId = (id) => new ObjectId(id);
+
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+
+const startOfToday = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const handleError = (res, error) => {
+  console.error(error);
+  res.status(500).json({ success: false, message: "Server error" });
+};
+
+
+const withParticipantsCount = [
+  {
+    $lookup: {
+      from: "eventRegistrations",
+      let: { id: "$_id" },
+      pipeline: [
+        { $match: { $expr: { $eq: ["$eventId", "$$id"] }, status: "joined" } },
+        { $project: { _id: 1 } },
+      ],
+      as: "participants",
+    },
+  },
+  { $addFields: { participantsCount: { $size: "$participants" } } },
+  { $project: { participants: 0 } },
+];
+
+function validateEvent(data, partial = false) {
+  const fields = ["title", "description", "eventType", "thumbnail", "location", "eventDate"];
+  const errors = [];
+
+  if (!partial) {
+    fields.forEach((field) => {
+      if (!data[field] || !String(data[field]).trim()) {
+        errors.push(`${field} is required`);
+      }
+    });
+  }
+
+  if (data.eventType !== undefined && !EVENT_TYPES.includes(data.eventType)) {
+    errors.push("Invalid event type");
+  }
+
+  if (data.eventDate !== undefined) {
+    const date = new Date(data.eventDate);
+
+    if (isNaN(date.getTime()) || date < startOfToday()) {
+      errors.push("Event date must be today or in the future");
+    }
+  }
+
+  if (data.maxParticipants !== undefined) {
+    const max = Number(data.maxParticipants);
+
+    if (!Number.isInteger(max) || max < 1) {
+      errors.push("Invalid participant limit");
+    }
+  }
+
+  return errors;
+}
