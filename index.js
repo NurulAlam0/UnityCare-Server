@@ -510,37 +510,6 @@ app.delete("/events/:id/leave", verifyToken, async (req, res) => {
     handleError(res, error);
   }
 });
-
-
-app.get("/events/:id/participants", verifyToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!validId(id)) {
-      return res.status(400).json({ message: "Invalid event ID" });
-    }
-
-    const event = await events.findOne({
-      _id: eventId(id),
-      creatorEmail: req.user.email,
-    });
-
-    if (!event) {
-      return res.status(404).json({ message: "Event not found or not yours" });
-    }
-
-    const result = await registrations
-      .find({ eventId: eventId(id), status: "joined" })
-      .sort({ joinedAt: -1 })
-      .project({ userEmail: 1, userName: 1, joinedAt: 1 })
-      .toArray();
-
-    res.json({ success: true, participants: result });
-  } catch (error) {
-    handleError(res, error);
-  }
-});
-
 // 404 Handler
 app.use((req, res) => {
   res.status(404).json({ message: "API route not found" });
