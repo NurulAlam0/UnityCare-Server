@@ -421,3 +421,143 @@ app.delete("/events/:id", verifyToken, async (req, res) => {
     handleError(res, error);
   }
 });
+
+// Join Event
+app.post("/events/:id/join", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!validId(id)) {
+      return res.status(400).json({ message: "Invalid event ID" });
+    }
+
+    const event = await events.findOne({
+      _id: eventId(id),
+      status: "published",
+      eventDate: { $gte: startOfToday() },
+    });
+
+    if (!event) {
+      return res.status(404).json({ message: "Event not found or already passed" });
+    }
+
+    if (event.creatorEmail === req.user.email) {
+      return res.status(400).json({ message: "Cannot join your own event" });
+    }
+
+    const existing = await registrations.findOne({
+      eventId: eventId(id),
+      userEmail: req.user.email,
+    });
+
+    if (existing) {
+      return res.status(409).json({ message: "Already joined" });
+    }
+
+    if (event.maxParticipants !== undefined) {
+      const count = await registrations.countDocuments({
+        eventId: eventId(id),
+        status: "joined",
+      });
+
+      if (count >= event.maxParticipants) {
+        return res.status(400).json({ message: "Event is full" });
+      }
+    }
+
+    await registrations.insertOne({
+      eventId: eventId(id),
+      userEmail: req.user.email,
+      userName: req.user.name,
+      status: "joined",
+      joinedAt: new Date(),
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Joined successfully",
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ message: "Already joined" });
+    }
+
+    handleError(res, error);
+  }
+});
+
+// Leave Event
+app.delete("/events/:id/leave", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!validId(id)) {
+      return res.status(400).json({ message: "Invalid event ID" });
+    }
+
+    const result = await registrations.deleteOne({
+      eventId: eventId(id),
+      userEmail: req.user.email,
+      status: "joined",
+    });
+
+    if (!result.deletedCount) {
+      return res.status(404).json({ message: "You have not joined" });
+    }
+
+    res.json({ success: true, message: "Left event successfully" });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+
+app.get("/events/:id/participants", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!validId(id)) {
+      return res.status(400).json({ message: "Invalid event ID" });
+    }
+
+    const event = await events.findOne({
+      _id: eventId(id),
+      creatorEmail: req.user.email,
+    });
+
+    if (!event) {
+      return res.status(404).json({ message: "Event not found or not yours" });
+    }
+
+    const result = await registrations
+      .find({ eventId: eventId(id), status: "joined" })
+      .sort({ joinedAt: -1 })
+      .project({ userEmail: 1, userName: 1, joinedAt: 1 })
+      .toArray();
+
+    res.json({ success: true, participants: result });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+// 404 Handler
+app.use((req, res) => {
+  res.status(404).json({ message: "API route not found" });
+});
+
+
+async function startServer() {
+  try {
+    await connectDB();
+
+    app.listen(PORT, () => {
+      console.log(`UnityCare server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Server startup failed:", error);
+    process.exit(1);
+  }
+}
+
+startServer();
